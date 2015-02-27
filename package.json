@@ -1,0 +1,16 @@
+{
+  "name": "winrmjs",
+  "version": "0.0.0",
+  "description": "",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "author": "Jacob Ludriks",
+  "license": "ISC",
+  "dependencies": {
+    "js2xmlparser": "^0.1.7",
+    "node-uuid": "^1.4.2",
+    "xml2js": "^0.4.5"
+  }
+}
