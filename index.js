@@ -8,7 +8,7 @@ var params = {
 	endpoint: 'http://127.0.0.1:5985/wsman',
 	transport: 'plaintext',
 	username: 'username',
-	password: 'whatever',
+	password: 'password',
 	realm: 'computername',
 	service: 'HTTP',
 	keytab: 'none',
@@ -27,9 +27,10 @@ var connectparams = {
 	lifetime: 'None',
 	idle_timeout: 'None'
 }
-function getsoapheader(resource_uri,action,callback) {
-	if (!message_id) var message_id = uuid.v4();
-	if (!resource_uri) var resource_uri = null;
+function getsoapheader(param,callback) {
+	console.log(param);
+	if (!param['message_id']) param['message_id'] = uuid.v4();
+	if (!param['resource_uri']) param['resource_uri'] = null;
 	var header = {
 		"@": {
 			"xmlns:env": "http://www.w3.org/2003/05/soap-envelope",
@@ -54,7 +55,7 @@ function getsoapheader(resource_uri,action,callback) {
 				},
 				"#": "153600"
 			},
-			"a:MessageID": "uuid:" + message_id,
+			"a:MessageID": "uuid:" + param['message_id'],
 			"w:Locale": {
 				"@": {
 					"mustUnderstand": "false",
@@ -67,39 +68,37 @@ function getsoapheader(resource_uri,action,callback) {
 					"xml:lang": "en-US"
 				}
 			},
+			//timeout should be PT60S = 60 seconds in ISO format
 			"w:OperationTimeout": "PT60S",
 			"w:ResourceURI": {
 				"@": {
 					"mustUnderstand": "true"
 				},
-				"#": resource_uri
+				"#": param['resource_uri']
 			},
 			"a:Action": {
 				"@": {
 					"mustUnderstand": "true"
 				},
-				"#": action
+				"#": param['action']
 			}
 		}
 	}
-	if (shell_id) {
-		header['env:Header'] = {
-			"w:SelectorSet": {
-				"w:Selector": {
-					"@": {
-						"Name": "ShellId"
-					},
-					"#": shell_id
-				}
+	if (param['shell_id']) {
+		header['env:Header']['w:SelectorSet'] = [];
+		header['env:Header']['w:SelectorSet'].push({
+			"w:Selector": {
+				"@": {
+					"Name": "ShellId"
+				},
+				"#": param['shell_id']
 			}
-		}
+		});
 	}
-	
-	console.log(header);
 	callback(header);
 }
 function open_shell(callback) {
-	getsoapheader('http://schemas.microsoft.com/wbem/wsman/1/windows/shell/cmd','http://schemas.xmlsoap.org/ws/2004/09/transfer/Create',function(res) {
+	getsoapheader({"resource_uri": "http://schemas.microsoft.com/wbem/wsman/1/windows/shell/cmd", "action": "http://schemas.xmlsoap.org/ws/2004/09/transfer/Create"},function(res) {
 		res['env:Body'] = {
 			"rsp:Shell": [
 				{
@@ -107,73 +106,87 @@ function open_shell(callback) {
 					"rsp:OutputStreams": "stderr stdout"
 				}
 			]
-		}
-		res['env:Header'] = {
-			"w:OptionSet": [
-				{
-					"w:Option": [
-						{
-							"@": {
-								"Name": "WINRS_NOPROFILE"
-							},
-							"#": "FALSE"
-						},
-						{
-							"@": {
-								"Name": "WINRS_CODEPAGE"
-							},
-							"#": "437"
-						}
-					]
-				}
-			]
-		}
-		callback(res);
-	});
-//timeout should be PT60S = 60 seconds in ISO format
-}
-
-function run_command(command,shellid,callback) {
-	getsoapheader('http://schemas.microsoft.com/wbem/wsman/1/windows/shell/cmd','http://schemas.microsoft.com/wbem/wsman/1/windows/shell/Command', function(res) {
-		res['env:Header'] = {
-			"w:OptionSet": [
+		};
+		res['env:Header']['w:OptionSet'] = [];
+		res['env:Header']['w:OptionSet'].push({
+			"w:Option": [
 				{
 					"@": {
-						"Name": "WINRS_CONSOLEMODE_STDIN"
-					}
-					"#": "CONSOLE_MODE_STDIN"
+						"Name": "WINRS_NOPROFILE"
+					},
+					"#": "FALSE"
 				},
 				{
 					"@": {
-						"Name": "WINRS_SKIP_CMD_SHELL"
-					}
-					"#": "SKIP_CMD_SHELL"
+						"Name": "WINRS_CODEPAGE"
+					},
+					"#": "437"
 				}
 			]
-		}
-		res['env:Body'] = {
+		})
+		var auth = 'Basic ' + new Buffer(params.username + ':' + params.password).toString('base64')
+		send_http(res,'127.0.0.1','5985','/wsman',auth,function(err,result) {
+			parsestring(result, function(err, result) {
+				if (result['s:Envelope']['s:Body'][0]['s:Fault']) {
+					callback(new Error(result['s:Envelope']['s:Body'][0]['s:Fault'][0]['s:Code'][0]['s:Subcode'][0]['s:Value'][0]));
+				}
+				else {
+					var shellid = result['s:Envelope']['s:Body'][0]['rsp:Shell'][0]['rsp:ShellId'][0];
+					callback(null,shellid);
+				}
+			});
+		});
+	});
+}
+
+function run_command(command,shellid,callback) {
+	getsoapheader({"resource_uri": "http://schemas.microsoft.com/wbem/wsman/1/windows/shell/cmd", "action": "http://schemas.microsoft.com/wbem/wsman/1/windows/shell/Command", "shell_id": shellid}, function(res) {
+		res['env:Header']['w:OptionSet'] = [];
+		res['env:Header']['w:OptionSet'].push([
+			{
+				"@": {
+					"Name": "WINRS_CONSOLEMODE_STDIN"
+				},
+				"#": "TRUE"
+			},
+			{
+				"@": {
+					"Name": "WINRS_SKIP_CMD_SHELL"
+				},
+				"#": "FALSE"
+			}
+		]);
+		res['env:Body'] = []
+		res['env:Body'].push({
 			"rsp:CommandLine": {
 				"rsp:Command": command
 			}
-		}
+		})
+		console.log(JSON.stringify(res));
+		var auth = 'Basic ' + new Buffer(params.username + ':' + params.password).toString('base64')
+		send_http(res,'127.0.0.1','5985','/wsman',auth,function(err,result) {
+			console.log(result);
+			//find node with "CommandId"
+		});
 	});
-	//convert to xml
-	//send
-	//find node with "CommandId"
-});
+};
 
-function get_command_output(shellid,commandid) {
+function get_command_output(shellid,commandid,callback) {
 	getsoapheader('http://schemas.microsoft.com/wbem/wsman/1/windows/shell/cmd','http://schemas.microsoft.com/wbem/wsman/1/windows/shell/Receive', function(res) {
 		res['env:Body'] = {
 			"rsp:Receive": {
 				"rsp:DesiredStream": {
 					"@": {
 						"CommandId": commandid
-					}
+					},
 					"#": "stdout stderr"
 				}
 			}
 		}
+		var auth = 'Basic ' + new Buffer(params.username + ':' + params.password).toString('base64')
+		send_http(res,'127.0.0.1','5985','/wsman',auth,function(err,result) {
+			console.log(result);
+		});
 		//convert to xml
 		//send
 		//look for nodes with "Stream".name = 'stdout or 'stderr'
@@ -228,39 +241,31 @@ function close_shell(shellid,callback) {
 		//send
 		//make sure "RelatesTo" matches the UUID sent with it
 	});
+}
 
-open_shell(function(res) {
-	console.log(res);
-});
-
-/*
-init(function(res) {
-	var xmldata = js2xmlparser('env:Envelope',res);
+function send_http(data,host,port,path,auth,callback) {
+	var xmldata = js2xmlparser('env:Envelope',data);
 	var options = {
-		hostname: '127.0.0.1',
-		port: '5985',
-		path: '/wsman',
+		hostname: host,
+		port: port,
+		path: path,
 		method: 'POST',
 		headers: {
 			'Content-Type': 'application/soap+xml;charset=UTF-8',
 			'User-Agent': 'JS WinRM Client',
-			'Content-Length': xmldata.length
+			'Content-Length': xmldata.length,
+			'Authorization': auth
 		},
-		auth: 'Basic ' + new Buffer(params.username + ':' + params.password).toString('base64')
 	};
 	var req = http.request(options, function(response) {
-		console.log('STATUS: ' + response.statusCode);
-		console.log('HEADERS: ' + JSON.stringify(response.headers));
+		if (!(response.statusCode == '200')) callback (new Error(response.statusCode));
+		//console.log('STATUS: ' + response.statusCode);
+		//console.log('HEADERS: ' + JSON.stringify(response.headers));
 		response.setEncoding('utf8');
 		response.on('data', function (chunk) {
 			parsestring(chunk, function(err, result) {
-				if (result['s:Envelope']['s:Body'][0]['s:Fault']) {
-					//callback(new Error(result['s:Envelope']['s:Body'][0]['s:Fault'][0]['s:Code'][0]['s:Subcode'][0]['s:Value'][0]));
-				}
-				else {
-					var shellid = result['s:Envelope']['s:Body'][0]['rsp:Shell'][0]['rsp:ShellId'][0];
-					console.log(shellid);
-				}
+				if (err) callback(new Error(err));
+				callback(null, chunk);
 			});
 		});
 	});
@@ -269,8 +274,18 @@ init(function(res) {
 	});
 	req.write(xmldata);
 	req.end();
+}
+
+open_shell(function(err,res) {
+	if (err) console.log("test");
+	//console.log(err);
+	else {
+		run_command('ipconfig.exe',res, function(err,response) {
+		
+		});
+		//res
+	}
 });
-*/
 
 /*
 class Session(object):
