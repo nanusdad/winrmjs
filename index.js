@@ -7,8 +7,8 @@ var shell_id = null;
 var params = {
 	endpoint: 'http://127.0.0.1:5985/wsman',
 	transport: 'plaintext',
-	username: 'username',
-	password: 'password',
+	username: 'jacob',
+	password: 'testing',
 	realm: 'computername',
 	service: 'HTTP',
 	keytab: 'none',
@@ -28,7 +28,6 @@ var connectparams = {
 	idle_timeout: 'None'
 }
 function getsoapheader(param,callback) {
-	console.log(param);
 	if (!param['message_id']) param['message_id'] = uuid.v4();
 	if (!param['resource_uri']) param['resource_uri'] = null;
 	var header = {
@@ -126,15 +125,13 @@ function open_shell(callback) {
 		})
 		var auth = 'Basic ' + new Buffer(params.username + ':' + params.password).toString('base64')
 		send_http(res,'127.0.0.1','5985','/wsman',auth,function(err,result) {
-			parsestring(result, function(err, result) {
-				if (result['s:Envelope']['s:Body'][0]['s:Fault']) {
-					callback(new Error(result['s:Envelope']['s:Body'][0]['s:Fault'][0]['s:Code'][0]['s:Subcode'][0]['s:Value'][0]));
-				}
-				else {
-					var shellid = result['s:Envelope']['s:Body'][0]['rsp:Shell'][0]['rsp:ShellId'][0];
-					callback(null,shellid);
-				}
-			});
+			if (result['s:Envelope']['s:Body'][0]['s:Fault']) {
+				callback(new Error(result['s:Envelope']['s:Body'][0]['s:Fault'][0]['s:Code'][0]['s:Subcode'][0]['s:Value'][0]));
+			}
+			else {
+				var shellid = result['s:Envelope']['s:Body'][0]['rsp:Shell'][0]['rsp:ShellId'][0];
+				callback(null,shellid);
+			}
 		});
 	});
 }
@@ -142,31 +139,32 @@ function open_shell(callback) {
 function run_command(command,shellid,callback) {
 	getsoapheader({"resource_uri": "http://schemas.microsoft.com/wbem/wsman/1/windows/shell/cmd", "action": "http://schemas.microsoft.com/wbem/wsman/1/windows/shell/Command", "shell_id": shellid}, function(res) {
 		res['env:Header']['w:OptionSet'] = [];
-		res['env:Header']['w:OptionSet'].push([
-			{
-				"@": {
-					"Name": "WINRS_CONSOLEMODE_STDIN"
+		res['env:Header']['w:OptionSet'].push({
+			"w:Option":	[
+				{
+					"@": {
+						"Name": "WINRS_CONSOLEMODE_STDIN"
+					},
+					"#": "TRUE"
 				},
-				"#": "TRUE"
-			},
-			{
-				"@": {
-					"Name": "WINRS_SKIP_CMD_SHELL"
-				},
-				"#": "FALSE"
-			}
-		]);
+				{
+					"@": {
+						"Name": "WINRS_SKIP_CMD_SHELL"
+					},
+					"#": "FALSE"
+				}
+			]
+		});
 		res['env:Body'] = []
 		res['env:Body'].push({
 			"rsp:CommandLine": {
 				"rsp:Command": command
 			}
 		})
-		console.log(JSON.stringify(res));
 		var auth = 'Basic ' + new Buffer(params.username + ':' + params.password).toString('base64')
 		send_http(res,'127.0.0.1','5985','/wsman',auth,function(err,result) {
-			console.log(result);
-			//find node with "CommandId"
+			var commandid = result['s:Envelope']['s:Body'][0]['rsp:CommandResponse'][0]['rsp:CommandId'][0];
+			callback(null,{shellid: shellid, commandid: commandid);
 		});
 	});
 };
@@ -190,31 +188,13 @@ function get_command_output(shellid,commandid,callback) {
 		//convert to xml
 		//send
 		//look for nodes with "Stream".name = 'stdout or 'stderr'
+		//also check rsp:CommandState for State "http://schemas.microsoft.com/wbem/wsman/1/windows/shell/CommandState/Done"
+		//"http://schemas.microsoft.com/wbem/wsman/1/windows/shell/CommandState/Running" = do not want
+		//also check rsp:ExitCode for 0 being done..
 		var stdout, stderr = null;
 		var return_code = "-1";
 		//encode in ascii
-		
 	});
-	/*
-	# We may need to get additional output if the stream has not finished.
-        # The CommandState will change from Running to Done like so:
-        # @example
-        #   from...
-        #   <rsp:CommandState CommandId="..." State="http://schemas.microsoft.com/wbem/wsman/1/windows/shell/CommandState/Running"/>  # NOQA
-        #   to...
-        #   <rsp:CommandState CommandId="..." State="http://schemas.microsoft.com/wbem/wsman/1/windows/shell/CommandState/Done">  # NOQA
-        #     <rsp:ExitCode>0</rsp:ExitCode>
-        #   </rsp:CommandState>
-        command_done = len([node for node in root.findall('.//*')
-                           if node.get('State', '').endswith(
-                            'CommandState/Done')]) == 1
-        if command_done:
-            return_code = int(next(node for node in root.findall('.//*')
-                                   if node.tag.endswith('ExitCode')).text)
-
-        return stdout, stderr, return_code, command_done
-		
-	*/
 }
 
 function cleanup_command(shellid,commandid,callback) {
@@ -263,9 +243,9 @@ function send_http(data,host,port,path,auth,callback) {
 		//console.log('HEADERS: ' + JSON.stringify(response.headers));
 		response.setEncoding('utf8');
 		response.on('data', function (chunk) {
-			parsestring(chunk, function(err, result) {
+			parsestring(chunk, function(err, chunkparsed) {
 				if (err) callback(new Error(err));
-				callback(null, chunk);
+				callback(null, chunkparsed);
 			});
 		});
 	});
@@ -281,28 +261,17 @@ open_shell(function(err,res) {
 	//console.log(err);
 	else {
 		run_command('ipconfig.exe',res, function(err,response) {
-		
+			if(err) console.log("test");
+			else {
+				get_command_output(response['shellid'],response['commandid'], function(err,output) {
+					if(err) console.log("test")
+					else {
+						//clean up
+						//terminate session
+						//return data to user
+					}
+				});
+			}
 		});
-		//res
 	}
 });
-
-/*
-class Session(object):
-    # TODO implement context manager methods
-    def __init__(self, target, auth, transport='plaintext'):
-        username, password = auth
-        self.url = self._build_url(target, transport)
-        self.protocol = Protocol(self.url, transport=transport,
-                                 username=username, password=password)
-								 
-
-    def run_cmd(self, command, args=()):
-        # TODO optimize perf. Do not call open/close shell every time
-        shell_id = self.protocol.open_shell()
-        command_id = self.protocol.run_command(shell_id, command, args)
-        rs = Response(self.protocol.get_command_output(shell_id, command_id))
-        self.protocol.cleanup_command(shell_id, command_id)
-        self.protocol.close_shell(shell_id)
-        return rs			
-*/		
