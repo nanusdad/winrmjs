@@ -3,30 +3,13 @@ var uuid = require('node-uuid');
 var js2xmlparser = require("js2xmlparser");
 var parsestring = require('xml2js').parseString;
 
-var shell_id = null;
-var params = {
-	endpoint: 'http://127.0.0.1:5985/wsman',
-	transport: 'plaintext',
-	username: 'jacob',
-	password: 'testing',
-	realm: 'computername',
-	service: 'HTTP',
-	keytab: 'none',
-	ca_trust_path: '',
-	cert_pem: '',
-	cert_key_pem: ''
-}
+//Kerberos
+//var krb_service = params.service + "@" + endpoint; //only need host/ipconfig
+//var krb_ticket = KerberosTicket(krb_service);
+//keep session alive with kerberos
+//var AuthHeader = "Authorization: krb_ticket.auth_header";
+//on connect krb_ticket.verify_response(response.headers['WWW-Authenticate']
 
-var connectparams = {
-	i_stream: 'stdin',
-	o_stream: 'stdout stderr',
-	working_directory: 'None',
-	env_vars: 'None',
-	noprofile: 'False',
-	codepage: '437',
-	lifetime: 'None',
-	idle_timeout: 'None'
-}
 function getsoapheader(param,callback) {
 	if (!param['message_id']) param['message_id'] = uuid.v4();
 	if (!param['resource_uri']) param['resource_uri'] = null;
@@ -96,8 +79,11 @@ function getsoapheader(param,callback) {
 	}
 	callback(header);
 }
-function open_shell(callback) {
-	getsoapheader({"resource_uri": "http://schemas.microsoft.com/wbem/wsman/1/windows/shell/cmd", "action": "http://schemas.xmlsoap.org/ws/2004/09/transfer/Create"},function(res) {
+function open_shell(params, callback) {
+	getsoapheader({
+		"resource_uri": "http://schemas.microsoft.com/wbem/wsman/1/windows/shell/cmd",
+		"action": "http://schemas.xmlsoap.org/ws/2004/09/transfer/Create"
+	},function(res) {
 		res['env:Body'] = {
 			"rsp:Shell": [
 				{
@@ -123,8 +109,8 @@ function open_shell(callback) {
 				}
 			]
 		})
-		var auth = 'Basic ' + new Buffer(params.username + ':' + params.password).toString('base64')
-		send_http(res,'127.0.0.1','5985','/wsman',auth,function(err,result) {
+		
+		send_http(res,params.host,params.port,params.path,params.auth,function(err,result) {
 			if (result['s:Envelope']['s:Body'][0]['s:Fault']) {
 				callback(new Error(result['s:Envelope']['s:Body'][0]['s:Fault'][0]['s:Code'][0]['s:Subcode'][0]['s:Value'][0]));
 			}
@@ -136,8 +122,12 @@ function open_shell(callback) {
 	});
 }
 
-function run_command(command,shellid,callback) {
-	getsoapheader({"resource_uri": "http://schemas.microsoft.com/wbem/wsman/1/windows/shell/cmd", "action": "http://schemas.microsoft.com/wbem/wsman/1/windows/shell/Command", "shell_id": shellid}, function(res) {
+function run_command(params,callback) {
+	getsoapheader({
+		"resource_uri": "http://schemas.microsoft.com/wbem/wsman/1/windows/shell/cmd",
+		"action": "http://schemas.microsoft.com/wbem/wsman/1/windows/shell/Command",
+		"shell_id": params.shellid
+	}, function(res) {
 		res['env:Header']['w:OptionSet'] = [];
 		res['env:Header']['w:OptionSet'].push({
 			"w:Option":	[
@@ -158,68 +148,90 @@ function run_command(command,shellid,callback) {
 		res['env:Body'] = []
 		res['env:Body'].push({
 			"rsp:CommandLine": {
-				"rsp:Command": command
+				"rsp:Command": params.command
 			}
 		})
-		var auth = 'Basic ' + new Buffer(params.username + ':' + params.password).toString('base64')
-		send_http(res,'127.0.0.1','5985','/wsman',auth,function(err,result) {
+		send_http(res,params.host,params.port,params.path,params.auth,function(err,result) {
 			var commandid = result['s:Envelope']['s:Body'][0]['rsp:CommandResponse'][0]['rsp:CommandId'][0];
-			callback(null,{shellid: shellid, commandid: commandid);
+			callback(null,commandid);
 		});
 	});
 };
 
-function get_command_output(shellid,commandid,callback) {
-	getsoapheader('http://schemas.microsoft.com/wbem/wsman/1/windows/shell/cmd','http://schemas.microsoft.com/wbem/wsman/1/windows/shell/Receive', function(res) {
+function get_command_output(params,callback) { 
+	getsoapheader({
+		"resource_uri": "http://schemas.microsoft.com/wbem/wsman/1/windows/shell/cmd",
+		"action": "http://schemas.microsoft.com/wbem/wsman/1/windows/shell/Receive",
+		"shell_id": params.shellid
+	}, function(res) {
 		res['env:Body'] = {
 			"rsp:Receive": {
 				"rsp:DesiredStream": {
 					"@": {
-						"CommandId": commandid
+						"CommandId": params.commandid
 					},
 					"#": "stdout stderr"
 				}
 			}
 		}
-		var auth = 'Basic ' + new Buffer(params.username + ':' + params.password).toString('base64')
-		send_http(res,'127.0.0.1','5985','/wsman',auth,function(err,result) {
-			console.log(result);
+		send_http(res,params.host,params.port,params.path,params.auth,function(err,result) {
+			if (result) {
+				//find a better way of getting this data. [2] is just a guess at the moment
+				//also need to get stderr interface
+				//also check rsp:CommandState for State "http://schemas.microsoft.com/wbem/wsman/1/windows/shell/CommandState/Done"
+				//"http://schemas.microsoft.com/wbem/wsman/1/windows/shell/CommandState/Running" = do not want
+				//also check rsp:ExitCode for 0 being done..
+				var output = new Buffer(result['s:Envelope']['s:Body'][0]['rsp:ReceiveResponse'][0]['rsp:Stream'][2]['_'], 'base64').toString('ascii');
+				callback(null,output);
+			}
 		});
-		//convert to xml
-		//send
-		//look for nodes with "Stream".name = 'stdout or 'stderr'
-		//also check rsp:CommandState for State "http://schemas.microsoft.com/wbem/wsman/1/windows/shell/CommandState/Done"
-		//"http://schemas.microsoft.com/wbem/wsman/1/windows/shell/CommandState/Running" = do not want
-		//also check rsp:ExitCode for 0 being done..
-		var stdout, stderr = null;
-		var return_code = "-1";
-		//encode in ascii
 	});
 }
 
-function cleanup_command(shellid,commandid,callback) {
-	getsoapheader('http://schemas.microsoft.com/wbem/wsman/1/windows/shell/cmd','http://schemas.microsoft.com/wbem/wsman/1/windows/shell/Signal', function(res) {
+function cleanup_command(params,callback) {
+	getsoapheader({
+		"resource_uri": "http://schemas.microsoft.com/wbem/wsman/1/windows/shell/cmd",
+		"action": "http://schemas.microsoft.com/wbem/wsman/1/windows/shell/Signal",
+		"shell_id": params.shellid
+	}, function(res) {
 		res['env:Body'] = {
 			"rsp:Signal": {
 				"@": {
-					"CommandId": commandid
+					"CommandId": params.commandid
 				},
 				"rsp:Code": "http://schemas.microsoft.com/wbem/wsman/1/windows/shell/signal/terminate"
 			}
 		}
-		//convert to xml
-		//send
-		//find node with "RelatesTo"
-		//make sure "RelatesTo" matches the UUID sent with it
+		var uuid = res['env:Header']['a:MessageID'];
+		
+		send_http(res,params.host,params.port,params.path,params.auth,function(err,result) {
+			var relatesto = result['s:Envelope']['s:Header'][0]['a:RelatesTo'][0];
+			if (relatesto == uuid) {
+				callback(null, "closed");
+				return;
+			}
+			callback(new Error("UUID in response does not match UUID sent"));
+		});
 	});
 }
 
-function close_shell(shellid,callback) {
-	getsoapheader('http://schemas.microsoft.com/wbem/wsman/1/windows/shell/cmd','http://schemas.xmlsoap.org/ws/2004/09/transfer/Delete', function(res) {
+function close_shell(params,callback) {
+	getsoapheader({
+		"resource_uri": "http://schemas.microsoft.com/wbem/wsman/1/windows/shell/cmd",
+		"action": "http://schemas.xmlsoap.org/ws/2004/09/transfer/Delete",
+		"shell_id": params.shellid
+	}, function(res) {
 		res['env:Body'] = { }
-		//convert to xml
-		//send
-		//make sure "RelatesTo" matches the UUID sent with it
+		var uuid = res['env:Header']['a:MessageID']
+		//strip "uuid:" from var uuid
+		send_http(res,params.host,params.port,params.path,params.auth,function(err,result) {
+			var relatesto = result['s:Envelope']['s:Header'][0]['a:RelatesTo'][0];
+			if (relatesto == uuid) {
+				callback(null, "closed");
+				return;
+			}
+			callback(new Error("UUID in response does not match UUID sent"));
+		});
 	});
 }
 
@@ -256,22 +268,67 @@ function send_http(data,host,port,path,auth,callback) {
 	req.end();
 }
 
-open_shell(function(err,res) {
-	if (err) console.log("test");
-	//console.log(err);
-	else {
-		run_command('ipconfig.exe',res, function(err,response) {
-			if(err) console.log("test");
-			else {
-				get_command_output(response['shellid'],response['commandid'], function(err,output) {
-					if(err) console.log("test")
-					else {
-						//clean up
-						//terminate session
-						//return data to user
-					}
-				});
-			}
-		});
+function run(command,host,port,path,username,password,callback) {
+	var runparams = {
+		command: command,
+		host: host,
+		port: port,
+		path: path,
+		username: username,
+		password: password,
+		auth: null,
+		shellid: null,
+		commandid: null,
+		results: null
 	}
+	//Basic authentication over http unfortunately. Definitely not secure at all.
+	//Todo: implement kerberos
+	//Todo: implement HTTPS
+	var auth = 'Basic ' + new Buffer(runparams.username + ':' + runparams.password).toString('base64');
+	runparams['auth'] = auth;
+	
+	open_shell(runparams, function(err, response) {
+		if (err) { return false; }
+		runparams.shellid = response;
+		function receiveddata(response) {
+			if (response == false) {
+			  //command not finished, trying loop again
+			  return false;
+			}
+			//command has finished running, getting results
+			runparams['results'] = response;
+			cleanup_command(runparams, function(err, response) {
+				if (err) { return false; }
+				close_shell(runparams, function(err,response) {
+					callback(null,runparams['results']);
+				});
+			});			
+		}
+		function pollCommand() {
+			get_command_output(runparams,function(err,response) {
+				//finished
+				if (err) {
+					receiveddata(FALSE);
+					return
+				}
+				if (response) {
+					receiveddata(response);
+					return;
+				}
+				setTimeout(function() {
+					pollCommand()
+				}, 1000);
+			});
+		}
+		run_command(runparams,function(err, response) {
+			if (err) { return false; }
+			runparams.commandid = response;
+			pollCommand();
+		});
+	});
+}
+
+module.exports(run);
+run('ipconfig.exe','127.0.0.1','5985','/wsman','Administrator','sometestpassword', function(err, response) {
+	console.log(response);
 });
