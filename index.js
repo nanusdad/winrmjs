@@ -2,13 +2,7 @@ var http = require('http');
 var uuid = require('node-uuid');
 var js2xmlparser = require("js2xmlparser");
 var parsestring = require('xml2js').parseString;
-
-//Kerberos
-//var krb_service = params.service + "@" + endpoint; //only need host/ipconfig
-//var krb_ticket = KerberosTicket(krb_service);
-//keep session alive with kerberos
-//var AuthHeader = "Authorization: krb_ticket.auth_header";
-//on connect krb_ticket.verify_response(response.headers['WWW-Authenticate']
+var krb = require('krbclient');
 
 function getsoapheader(param,callback) {
 	if (!param['message_id']) param['message_id'] = uuid.v4();
@@ -329,6 +323,3 @@ function run(command,host,port,path,username,password,callback) {
 }
 
 module.exports(run);
-run('ipconfig.exe','127.0.0.1','5985','/wsman','Administrator','sometestpassword', function(err, response) {
-	console.log(response);
-});

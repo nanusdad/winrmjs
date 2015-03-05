@@ -1,16 +1,31 @@
 {
-  "name": "winrmjs",
-  "version": "0.0.0",
-  "description": "",
-  "main": "index.js",
-  "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1"
-  },
-  "author": "Jacob Ludriks",
-  "license": "ISC",
-  "dependencies": {
-    "js2xmlparser": "^0.1.7",
-    "node-uuid": "^1.4.2",
-    "xml2js": "^0.4.5"
-  }
+	"name": "winrmjs",
+	"version": "0.0.1",
+	"author": "Jacob Ludriks",
+	"description": "Node.js module for WinRM",
+	"repository": {
+		"type": "git",
+		"url": "git://github.com/jacobludriks/winrmjs.git"
+	},
+	"homepage": "http://github.com/jacobludriks/winrmjs",
+	"main": "index.js",
+	"keywords": [
+		"winrm",
+		"windows",
+		"powershell"
+	],
+	"engines": {
+		"node": ">=0.12.0"
+	},
+	"scripts": {
+		"test": "echo \"Error: no test specified\" && exit 1"
+	},
+	"dependencies": {
+		"js2xmlparser": "^0.1.7",
+		"node-uuid": "^1.4.2",
+		"xml2js": "^0.4.5",
+		"krbclient": "0.1.0"
+	},
+	"devDependencies": {},
+	"optionalDependencies": {}
 }
