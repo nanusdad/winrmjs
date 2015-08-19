@@ -322,4 +322,4 @@ function run(command,host,port,path,username,password,callback) {
 	});
 }
 
-module.exports(run);
+module.exports = run;
