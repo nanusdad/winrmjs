@@ -2,7 +2,7 @@ var http = require('http');
 var uuid = require('node-uuid');
 var js2xmlparser = require("js2xmlparser");
 var parsestring = require('xml2js').parseString;
-var krb = require('krbclient');
+//var krb = require('krbclient');
 
 function getsoapheader(param,callback) {
 	if (!param['message_id']) param['message_id'] = uuid.v4();
